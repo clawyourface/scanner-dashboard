@@ -136,7 +136,7 @@ function ScoreBar({ stocks }) {
 
 function RadarChart({ scores, color }) {
   const labels = ["Growth", "Value", "Quality", "Discount"];
-  const cx = 100, cy = 100, r = 60;
+  const cx = 120, cy = 100, r = 55;
   const angles = labels.map((_, i) => (Math.PI * 2 * i / labels.length) - Math.PI / 2);
 
   const rings = [25, 50, 75, 100];
@@ -147,7 +147,7 @@ function RadarChart({ scores, color }) {
   }).join(" ");
 
   return (
-    <svg width="200" height="200" viewBox="0 0 200 200">
+    <svg width="240" height="200" viewBox="0 0 240 200">
       {rings.map(ring => (
         <polygon key={ring}
           points={angles.map(a => `${cx + (ring/100)*r*Math.cos(a)},${cy + (ring/100)*r*Math.sin(a)}`).join(" ")}
@@ -283,7 +283,7 @@ function StockCard({ s, expanded, onClick, deployAmount }) {
       {expanded && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
           <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-            <div style={{ flex: "0 0 200px" }}>
+            <div style={{ flex: "0 0 240px" }}>
               <RadarChart scores={scores} color={scoreColor(s.calvin_score)} />
             </div>
             <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, minWidth: 200 }}>
