@@ -136,7 +136,7 @@ function ScoreBar({ stocks }) {
 
 function RadarChart({ scores, color }) {
   const labels = ["Growth", "Value", "Quality", "Discount"];
-  const cx = 120, cy = 100, r = 55;
+  const cx = 150, cy = 130, r = 80;
   const angles = labels.map((_, i) => (Math.PI * 2 * i / labels.length) - Math.PI / 2);
 
   const rings = [25, 50, 75, 100];
@@ -147,22 +147,22 @@ function RadarChart({ scores, color }) {
   }).join(" ");
 
   return (
-    <svg width="240" height="200" viewBox="0 0 240 200">
+    <svg width="100%" viewBox="0 0 300 260" style={{ display: "block" }}>
       {rings.map(ring => (
         <polygon key={ring}
           points={angles.map(a => `${cx + (ring/100)*r*Math.cos(a)},${cy + (ring/100)*r*Math.sin(a)}`).join(" ")}
           fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
       ))}
       {angles.map((a, i) => {
-        const lx = cx + (r + 22) * Math.cos(a);
-        const ly = cy + (r + 22) * Math.sin(a) + 4;
-        const anchor = lx < cx - 5 ? "end" : lx > cx + 5 ? "start" : "middle";
+        const lx = cx + (r + 28) * Math.cos(a);
+        const ly = cy + (r + 28) * Math.sin(a) + 4;
+        const anchor = Math.cos(a) < -0.1 ? "end" : Math.cos(a) > 0.1 ? "start" : "middle";
         return (
           <g key={i}>
             <line x1={cx} y1={cy} x2={cx + r * Math.cos(a)} y2={cy + r * Math.sin(a)}
               stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
             <text x={lx} y={ly}
-              textAnchor={anchor} fill="#9CA3AF" fontSize="11">{labels[i]}</text>
+              textAnchor={anchor} fill="#9CA3AF" fontSize="13" fontWeight="500">{labels[i]}</text>
           </g>
         );
       })}
@@ -172,7 +172,7 @@ function RadarChart({ scores, color }) {
         const a = angles[i];
         const dist = (v / 100) * r;
         return <circle key={i} cx={cx + dist * Math.cos(a)} cy={cy + dist * Math.sin(a)}
-          r="3" fill={color} />;
+          r="4" fill={color} />;
       })}
     </svg>
   );
@@ -282,16 +282,14 @@ function StockCard({ s, expanded, onClick, deployAmount }) {
 
       {expanded && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-          <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-            <div style={{ flex: "0 0 240px" }}>
-              <RadarChart scores={scores} color={scoreColor(s.calvin_score)} />
-            </div>
-            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, minWidth: 200 }}>
-              <Metric label="Fwd P/E" value={Number(s.forward_pe).toFixed(1)} sub={`Hist avg: ${s.hist_avg_pe}`} />
-              <Metric label="Fwd PEG" value={Number(s.forward_peg).toFixed(2)} sub={`Trail: ${Number(s.trailing_peg).toFixed(2)}`} />
-              <Metric label="EPS Growth" value={`${s.forward_eps_growth}%`} sub={`Op Margin: ${s.operating_margin}%`} />
-              <Metric label="ROE" value={`${Number(s.roe).toFixed(1)}%`} sub={`GM: ${s.gross_margin}%`} />
-            </div>
+          <div style={{ marginBottom: 16, maxWidth: 400, margin: "0 auto 16px" }}>
+            <RadarChart scores={scores} color={scoreColor(s.calvin_score)} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginBottom: 16 }}>
+            <Metric label="Fwd P/E" value={Number(s.forward_pe).toFixed(1)} sub={`Hist avg: ${s.hist_avg_pe}`} />
+            <Metric label="Fwd PEG" value={Number(s.forward_peg).toFixed(2)} sub={`Trail: ${Number(s.trailing_peg).toFixed(2)}`} />
+            <Metric label="EPS Growth" value={`${s.forward_eps_growth}%`} sub={`Op Margin: ${s.operating_margin}%`} />
+            <Metric label="ROE" value={`${Number(s.roe).toFixed(1)}%`} sub={`GM: ${s.gross_margin}%`} />
           </div>
 
           <div style={{
