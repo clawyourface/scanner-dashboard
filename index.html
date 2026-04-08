@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Calvin Score Scanner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.7/Recharts.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, #0B1120 0%, #111827 100%);
+    color: #F3F4F6;
+    font-family: 'Inter', 'SF Pro', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+  }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+const {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell
+} = Recharts;
+
+// =============================================================================
+// CONFIG
+// =============================================================================
+const REPO_OWNER = "clawyourface";
+const REPO_NAME = "scanner-dashboard";
+const SCANS_PATH = "scans";
+
+// =============================================================================
+// DATA LOADING
+// =============================================================================
+async function fetchScanList() {
+  // Try GitHub API first (works when hosted on GitHub Pages)
+  try {
+    const resp = await fetch(
+      `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${SCANS_PATH}`
+    );
+    if (resp.ok) {
+      const files = await resp.json();
+      return files
+        .filter(f => f.name.endsWith(".csv"))
+        .map(f => f.name)
+        .sort()
+        .reverse();
+    }
+  } catch (e) {}
+
+  // Fallback: try loading scan-index.json (for local or non-GitHub hosting)
+  try {
+    const resp = await fetch("scans/scan-index.json");
+    if (resp.ok) {
+      const data = await resp.json();
+      return data.scans.sort().reverse();
+    }
+  } catch (e) {}
+
+  return [];
+}
+
+async function fetchScanData(filename) {
+  const resp = await fetch(`${SCANS_PATH}/${filename}`);
+  const text = await resp.text();
+  const result = Papa.parse(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
+  return result.data;
+}
+
+function parseScanTimestamp(filename) {
+  // scan-2026-04-07-1500.csv -> readable date
+  const match = filename.match(/scan-(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})/);
+  if (!match) return filename;
+  const [, y, m, d, h, min] = match;
+  const date = new Date(`${y}-${m}-${d}T${h}:${min}:00`);
+  return date.toLocaleDateString("en-US", {
+    weekday: "short", month: "short", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit"
+  });
+}
+
+// =============================================================================
+// STYLING HELPERS
+// =============================================================================
+const scoreColor = v => {
+  if (v >= 90) return "#10B981";
+  if (v >= 75) return "#3B82F6";
+  if (v >= 60) return "#F59E0B";
+  return "#6B7280";
+};
+
+const scoreBand = v => {
+  if (v >= 90) return "Exceptional";
+  if (v >= 75) return "Strong";
+  if (v >= 60) return "Decent";
+  return "Wait";
+};
+
+const pegColor = s => {
+  if (s === "strong value") return "#10B981";
+  if (s === "accelerating") return "#3B82F6";
+  if (s === "decelerating") return "#F59E0B";
+  if (s === "expensive") return "#EF4444";
+  return "#6B7280";
+};
+
+const lynchColor = z => {
+  if (z === "deep inside tunnel") return "#10B981";
+  if (z === "lower tunnel") return "#34D399";
+  if (z === "mid tunnel") return "#3B82F6";
+  if (z === "upper tunnel") return "#F59E0B";
+  if (z === "above tunnel") return "#EF4444";
+  return "#6B7280";
+};
+
+// =============================================================================
+// COMPONENTS
+// =============================================================================
+function Pill({ text, color }) {
+  return (
+    <span style={{
+      display: "inline-block", padding: "2px 10px", borderRadius: 99,
+      fontSize: 11, fontWeight: 600, letterSpacing: 0.3,
+      background: color + "18", color, border: `1px solid ${color}40`,
+      textTransform: "uppercase", whiteSpace: "nowrap"
+    }}>{text}</span>
+  );
+}
+
+function Metric({ label, value, sub, large }) {
+  return (
+    <div style={{
+      padding: "10px 14px", background: "rgba(255,255,255,0.04)",
+      borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)"
+    }}>
+      <div style={{ fontSize: 11, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: large ? 28 : 20, fontWeight: 700, color: "#F3F4F6" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function TunnelBar({ s }) {
+  const pos = Math.max(0, Math.min(1.3, (s.tunnel_position || 0) / 100));
+  const pct = (pos / 1.3) * 100;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#6B7280", marginBottom: 3 }}>
+        <span>${Math.round(s.lynch_floor || 0)}</span>
+        <span>${Math.round(s.lynch_ceiling || 0)}</span>
+      </div>
+      <div style={{ position: "relative", height: 14, background: "rgba(59,130,246,0.12)", borderRadius: 7, overflow: "visible" }}>
+        <div style={{
+          position: "absolute", left: 0, top: 0, height: "100%", borderRadius: 7,
+          width: `${Math.min(100, (1 / 1.3) * 100)}%`,
+          background: "linear-gradient(90deg, rgba(16,185,129,0.25), rgba(59,130,246,0.2), rgba(245,158,11,0.25))"
+        }} />
+        <div style={{
+          position: "absolute", top: -1, left: `calc(${pct}% - 8px)`,
+          width: 16, height: 16, borderRadius: "50%",
+          background: lynchColor(s.lynch_zone), border: "2px solid rgba(0,0,0,0.5)",
+          transition: "left 0.3s"
+        }} />
+      </div>
+      <div style={{ fontSize: 10, color: lynchColor(s.lynch_zone), marginTop: 3, textAlign: "center" }}>{s.lynch_zone}</div>
+    </div>
+  );
+}
+
+function StockCard({ s, expanded, onClick, deployAmount }) {
+  const radarData = [
+    { factor: "Growth", score: s.growth_score || 0, fullMark: 100 },
+    { factor: "Value", score: s.value_score || 0, fullMark: 100 },
+    { factor: "Quality", score: s.quality_score || 0, fullMark: 100 },
+    { factor: "Discount", score: s.discount_score || 0, fullMark: 100 },
+  ];
+
+  return (
+    <div onClick={onClick} style={{
+      background: "rgba(17,24,39,0.8)", borderRadius: 16,
+      border: `1px solid ${expanded ? scoreColor(s.calvin_score) + "60" : "rgba(255,255,255,0.06)"}`,
+      padding: 20, cursor: "pointer", transition: "all 0.2s"
+    }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#F3F4F6", letterSpacing: -0.5 }}>{s.ticker}</div>
+          <div style={{ fontSize: 12, color: "#9CA3AF" }}>{s.name}</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>${Number(s.price).toFixed(2)}</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 36, fontWeight: 800, color: scoreColor(s.calvin_score), lineHeight: 1 }}>
+            {s.calvin_score}
+          </div>
+          <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>{scoreBand(s.calvin_score)}</div>
+        </div>
+      </div>
+
+      {/* Pills */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        <Pill text={s.peg_signal} color={pegColor(s.peg_signal)} />
+        <Pill text={`${Number(s.drawdown_pct).toFixed(1)}% off high`} color={s.drawdown_pct > 25 ? "#EF4444" : s.drawdown_pct > 15 ? "#F59E0B" : "#6B7280"} />
+        {deployAmount > 0 && <Pill text={`Deploy $${deployAmount}`} color="#10B981" />}
+      </div>
+
+      {/* Factor scores bar */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginBottom: 12 }}>
+        {[
+          { l: "Growth", v: s.growth_score },
+          { l: "Value", v: s.value_score },
+          { l: "Quality", v: s.quality_score },
+          { l: "Discount", v: s.discount_score }
+        ].map(f => (
+          <div key={f.l} style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: "#6B7280", marginBottom: 1 }}>{f.l}</div>
+            <div style={{
+              fontSize: 16, fontWeight: 700,
+              color: f.v >= 75 ? "#10B981" : f.v >= 50 ? "#F59E0B" : "#EF4444"
+            }}>{Math.round(f.v || 0)}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Lynch Tunnel */}
+      <TunnelBar s={s} />
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+          <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 200px", minHeight: 160 }}>
+              <ResponsiveContainer width="100%" height={160}>
+                <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
+                  <PolarGrid stroke="rgba(255,255,255,0.08)" />
+                  <PolarAngleAxis dataKey="factor" tick={{ fontSize: 10, fill: "#9CA3AF" }} />
+                  <PolarRadiusAxis angle={90} domain={[0, 100]} tick={false} axisLine={false} />
+                  <Radar dataKey="score" stroke={scoreColor(s.calvin_score)} fill={scoreColor(s.calvin_score)} fillOpacity={0.2} strokeWidth={2} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ flex: "1 1 200px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <Metric label="Fwd P/E" value={Number(s.forward_pe).toFixed(1)} sub={`Hist avg: ${s.hist_avg_pe}`} />
+              <Metric label="Fwd PEG" value={Number(s.forward_peg).toFixed(2)} sub={`Trail: ${Number(s.trailing_peg).toFixed(2)}`} />
+              <Metric label="EPS Growth" value={`${s.forward_eps_growth}%`} sub={`Rev growth in data`} />
+              <Metric label="ROE" value={`${Number(s.roe).toFixed(1)}%`} sub={`GM: ${s.gross_margin}%`} />
+            </div>
+          </div>
+
+          {/* Recommendation */}
+          <div style={{
+            padding: "10px 14px", borderRadius: 10,
+            background: scoreColor(s.calvin_score) + "10",
+            border: `1px solid ${scoreColor(s.calvin_score)}30`,
+            fontSize: 13, color: "#D1D5DB", lineHeight: 1.5
+          }}>
+            {s.recommendation}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScanSelector({ scans, selected, onSelect }) {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <select
+        value={selected}
+        onChange={e => onSelect(e.target.value)}
+        style={{
+          background: "rgba(255,255,255,0.06)", color: "#F3F4F6",
+          border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8,
+          padding: "8px 12px", fontSize: 13, cursor: "pointer",
+          outline: "none", minWidth: 260
+        }}
+      >
+        {scans.map(f => (
+          <option key={f} value={f} style={{ background: "#1F2937" }}>
+            {parseScanTimestamp(f)}
+          </option>
+        ))}
+      </select>
+      <button
+        onClick={() => onSelect(scans[0])}
+        style={{
+          background: scans[0] === selected ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.06)",
+          color: scans[0] === selected ? "#10B981" : "#9CA3AF",
+          border: `1px solid ${scans[0] === selected ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.12)"}`,
+          borderRadius: 8, padding: "8px 16px", fontSize: 12,
+          fontWeight: 600, cursor: "pointer", textTransform: "uppercase",
+          letterSpacing: 0.5
+        }}
+      >
+        Latest
+      </button>
+      <span style={{ fontSize: 11, color: "#6B7280" }}>
+        {scans.length} scan{scans.length !== 1 ? "s" : ""} archived
+      </span>
+    </div>
+  );
+}
+
+// =============================================================================
+// MAIN APP
+// =============================================================================
+function App() {
+  const [scans, setScans] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [stocks, setStocks] = useState([]);
+  const [expanded, setExpanded] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [deployCash, setDeployCash] = useState(0);
+  const [scanMeta, setScanMeta] = useState({});
+
+  // Load scan list on mount
+  useEffect(() => {
+    fetchScanList().then(files => {
+      if (files.length === 0) {
+        setError("No scan files found. Run the scanner in Cowork to generate your first scan.");
+        setLoading(false);
+        return;
+      }
+      setScans(files);
+      setSelectedFile(files[0]);
+    }).catch(e => {
+      setError("Could not load scan list. Check that the repository is public and GitHub Pages is enabled.");
+      setLoading(false);
+    });
+  }, []);
+
+  // Load scan data when selection changes
+  useEffect(() => {
+    if (!selectedFile) return;
+    setLoading(true);
+    fetchScanData(selectedFile).then(data => {
+      const sorted = [...data].sort((a, b) => (b.calvin_score || 0) - (a.calvin_score || 0));
+      setStocks(sorted);
+      setExpanded(sorted[0]?.ticker || null);
+      setDeployCash(data[0]?.deploy_cash || 0);
+      setScanMeta({
+        timestamp: data[0]?.scan_timestamp || "",
+        mode: data[0]?.scan_mode || "full"
+      });
+      setLoading(false);
+      setError(null);
+    }).catch(e => {
+      setError(`Failed to load scan: ${selectedFile}`);
+      setLoading(false);
+    });
+  }, [selectedFile]);
+
+  // Deployment allocation
+  const qualifying = stocks.filter(s => s.calvin_score >= 60);
+  const totalQ = qualifying.reduce((sum, s) => sum + (s.calvin_score || 0), 0) || 1;
+  const getAlloc = (s) => {
+    if (s.calvin_score < 60 || deployCash <= 0) return 0;
+    return Math.round(deployCash * (s.calvin_score / totalQ));
+  };
+
+  // Bar chart data
+  const barData = stocks.map(s => ({
+    ticker: s.ticker,
+    score: s.calvin_score || 0,
+    fill: scoreColor(s.calvin_score || 0)
+  }));
+
+  return (
+    <div style={{ padding: "24px 16px", maxWidth: 840, margin: "0 auto" }}>
+
+      {/* Header */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>
+          Calvin Score Scanner
+        </div>
+        <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: -0.5 }}>
+          Portfolio Deployment Dashboard
+        </div>
+
+        {/* Scan selector */}
+        {scans.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <ScanSelector scans={scans} selected={selectedFile} onSelect={setSelectedFile} />
+          </div>
+        )}
+
+        {scanMeta.timestamp && (
+          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 8 }}>
+            Scanned: {new Date(scanMeta.timestamp).toLocaleString()} &middot; Mode: {scanMeta.mode} &middot; Data from stockanalysis.com
+          </div>
+        )}
+      </div>
+
+      {/* Loading / Error states */}
+      {loading && (
+        <div style={{ textAlign: "center", padding: 60 }}>
+          <div style={{ fontSize: 16, color: "#9CA3AF" }}>Loading scan data...</div>
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{
+          padding: 24, borderRadius: 14, textAlign: "center",
+          background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.15)"
+        }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#F3F4F6", marginBottom: 6 }}>No Data</div>
+          <div style={{ fontSize: 13, color: "#9CA3AF" }}>{error}</div>
+        </div>
+      )}
+
+      {!loading && !error && stocks.length > 0 && (
+        <>
+          {/* Summary metrics */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 24 }}>
+            <Metric label="Top pick" value={stocks[0].ticker} sub={`Score: ${stocks[0].calvin_score}`} large />
+            <Metric label="Cash" value={deployCash > 0 ? `$${deployCash.toLocaleString()}` : "\u2014"} sub="Available to deploy" large />
+            <Metric label="Candidates" value={qualifying.length} sub="Score \u2265 60" large />
+            <Metric label="Best signal" value={(stocks[0].peg_signal || "").split(" ")[0]} sub="Dual-PEG" large />
+          </div>
+
+          {/* Composite scores bar chart */}
+          <div style={{
+            marginBottom: 24, background: "rgba(17,24,39,0.6)", borderRadius: 14,
+            padding: 16, border: "1px solid rgba(255,255,255,0.06)"
+          }}>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>
+              Composite Scores
+            </div>
+            <ResponsiveContainer width="100%" height={Math.max(120, stocks.length * 28)}>
+              <BarChart data={barData} layout="vertical" margin={{ left: 4, right: 16, top: 0, bottom: 0 }}>
+                <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="ticker" tick={{ fontSize: 12, fill: "#D1D5DB", fontWeight: 600 }} axisLine={false} tickLine={false} width={50} />
+                <Tooltip
+                  contentStyle={{ background: "#1F2937", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12, color: "#F3F4F6" }}
+                  formatter={(v) => [v, "Calvin Score"]}
+                />
+                <Bar dataKey="score" radius={[0, 6, 6, 0]} barSize={16}>
+                  {barData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Deployment allocation */}
+          {qualifying.length > 0 && deployCash > 0 && (
+            <div style={{
+              marginBottom: 24, padding: 16, borderRadius: 14,
+              background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.15)"
+            }}>
+              <div style={{ fontSize: 12, color: "#10B981", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>
+                Deployment Allocation &middot; ${deployCash.toLocaleString()}
+              </div>
+              <div style={{ display: "flex", gap: 12 }}>
+                {qualifying.map(s => {
+                  const alloc = getAlloc(s);
+                  const shares = (alloc / s.price).toFixed(1);
+                  return (
+                    <div key={s.ticker} style={{ flex: 1, textAlign: "center" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#F3F4F6" }}>${alloc}</div>
+                      <div style={{ fontSize: 12, color: "#10B981", fontWeight: 600 }}>{s.ticker}</div>
+                      <div style={{ fontSize: 10, color: "#6B7280" }}>~{shares} shares</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Stock cards */}
+          <div style={{ display: "grid", gap: 12 }}>
+            {stocks.map(s => (
+              <StockCard
+                key={s.ticker}
+                s={s}
+                expanded={expanded === s.ticker}
+                onClick={() => setExpanded(expanded === s.ticker ? null : s.ticker)}
+                deployAmount={getAlloc(s)}
+              />
+            ))}
+          </div>
+
+          {/* Footer */}
+          <div style={{
+            marginTop: 24, padding: 16, borderRadius: 14,
+            background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)"
+          }}>
+            <div style={{ fontSize: 11, color: "#6B7280", lineHeight: 1.6 }}>
+              Calvin Score Scanner &middot; Factor weights: Growth 35% &middot; Value 30% &middot; Quality 20% &middot; Discount 15%.
+              Dual-PEG value system with Lynch Tunnel indicator. All scores use deterministic linear interpolation.
+              This is a decision support tool, not financial advice. The user's judgment is the final authority.
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
