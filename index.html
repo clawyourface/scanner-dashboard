@@ -7,7 +7,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.7/Recharts.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -25,11 +24,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useCallback } = React;
-const {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell
-} = Recharts;
+const { useState, useEffect } = React;
 
 // =============================================================================
 // CONFIG
@@ -42,7 +37,6 @@ const SCANS_PATH = "scans";
 // DATA LOADING
 // =============================================================================
 async function fetchScanList() {
-  // Try GitHub API first (works when hosted on GitHub Pages)
   try {
     const resp = await fetch(
       `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${SCANS_PATH}`
@@ -56,16 +50,6 @@ async function fetchScanList() {
         .reverse();
     }
   } catch (e) {}
-
-  // Fallback: try loading scan-index.json (for local or non-GitHub hosting)
-  try {
-    const resp = await fetch("scans/scan-index.json");
-    if (resp.ok) {
-      const data = await resp.json();
-      return data.scans.sort().reverse();
-    }
-  } catch (e) {}
-
   return [];
 }
 
@@ -77,7 +61,6 @@ async function fetchScanData(filename) {
 }
 
 function parseScanTimestamp(filename) {
-  // scan-2026-04-07-1500.csv -> readable date
   const match = filename.match(/scan-(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})/);
   if (!match) return filename;
   const [, y, m, d, h, min] = match;
@@ -122,8 +105,75 @@ const lynchColor = z => {
   return "#6B7280";
 };
 
+const factorColor = v => v >= 75 ? "#10B981" : v >= 50 ? "#F59E0B" : "#EF4444";
+
 // =============================================================================
-// COMPONENTS
+// SVG CHART COMPONENTS
+// =============================================================================
+function ScoreBar({ stocks }) {
+  const barH = 20, gap = 8, padL = 55, padR = 40;
+  const h = stocks.length * (barH + gap) + gap;
+  return (
+    <svg width="100%" viewBox={`0 0 600 ${h}`} style={{ display: "block" }}>
+      {stocks.map((s, i) => {
+        const y = gap + i * (barH + gap);
+        const w = Math.max(0, (s.calvin_score / 100) * (600 - padL - padR));
+        const color = scoreColor(s.calvin_score);
+        return (
+          <g key={s.ticker}>
+            <text x={padL - 8} y={y + barH / 2 + 4} textAnchor="end"
+              fill="#D1D5DB" fontSize="12" fontWeight="600">{s.ticker}</text>
+            <rect x={padL} y={y} width={w} height={barH} rx={4} fill={color} opacity={0.85} />
+            <text x={padL + w + 6} y={y + barH / 2 + 4}
+              fill="#9CA3AF" fontSize="11">{s.calvin_score}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function RadarChart({ scores, color }) {
+  const labels = ["Growth", "Value", "Quality", "Discount"];
+  const cx = 80, cy = 80, r = 60;
+  const angles = labels.map((_, i) => (Math.PI * 2 * i / labels.length) - Math.PI / 2);
+
+  const rings = [25, 50, 75, 100];
+  const pointsFn = (vals) => vals.map((v, i) => {
+    const a = angles[i];
+    const dist = (v / 100) * r;
+    return `${cx + dist * Math.cos(a)},${cy + dist * Math.sin(a)}`;
+  }).join(" ");
+
+  return (
+    <svg width="160" height="160" viewBox="0 0 160 160">
+      {rings.map(ring => (
+        <polygon key={ring}
+          points={angles.map(a => `${cx + (ring/100)*r*Math.cos(a)},${cy + (ring/100)*r*Math.sin(a)}`).join(" ")}
+          fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
+      ))}
+      {angles.map((a, i) => (
+        <g key={i}>
+          <line x1={cx} y1={cy} x2={cx + r * Math.cos(a)} y2={cy + r * Math.sin(a)}
+            stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+          <text x={cx + (r + 14) * Math.cos(a)} y={cy + (r + 14) * Math.sin(a) + 3}
+            textAnchor="middle" fill="#9CA3AF" fontSize="9">{labels[i]}</text>
+        </g>
+      ))}
+      <polygon points={pointsFn(scores)} fill={color} fillOpacity={0.15}
+        stroke={color} strokeWidth="2" />
+      {scores.map((v, i) => {
+        const a = angles[i];
+        const dist = (v / 100) * r;
+        return <circle key={i} cx={cx + dist * Math.cos(a)} cy={cy + dist * Math.sin(a)}
+          r="3" fill={color} />;
+      })}
+    </svg>
+  );
+}
+
+// =============================================================================
+// UI COMPONENTS
 // =============================================================================
 function Pill({ text, color }) {
   return (
@@ -150,8 +200,9 @@ function Metric({ label, value, sub, large }) {
 }
 
 function TunnelBar({ s }) {
-  const pos = Math.max(0, Math.min(1.3, (s.tunnel_position || 0) / 100));
-  const pct = (pos / 1.3) * 100;
+  const raw = s.tunnel_position || 0;
+  const pos = Math.max(0, Math.min(130, raw));
+  const pct = (pos / 130) * 100;
   return (
     <div style={{ marginTop: 6 }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#6B7280", marginBottom: 3 }}>
@@ -161,7 +212,7 @@ function TunnelBar({ s }) {
       <div style={{ position: "relative", height: 14, background: "rgba(59,130,246,0.12)", borderRadius: 7, overflow: "visible" }}>
         <div style={{
           position: "absolute", left: 0, top: 0, height: "100%", borderRadius: 7,
-          width: `${Math.min(100, (1 / 1.3) * 100)}%`,
+          width: `${Math.min(100, (100 / 130) * 100)}%`,
           background: "linear-gradient(90deg, rgba(16,185,129,0.25), rgba(59,130,246,0.2), rgba(245,158,11,0.25))"
         }} />
         <div style={{
@@ -177,12 +228,7 @@ function TunnelBar({ s }) {
 }
 
 function StockCard({ s, expanded, onClick, deployAmount }) {
-  const radarData = [
-    { factor: "Growth", score: s.growth_score || 0, fullMark: 100 },
-    { factor: "Value", score: s.value_score || 0, fullMark: 100 },
-    { factor: "Quality", score: s.quality_score || 0, fullMark: 100 },
-    { factor: "Discount", score: s.discount_score || 0, fullMark: 100 },
-  ];
+  const scores = [s.growth_score || 0, s.value_score || 0, s.quality_score || 0, s.discount_score || 0];
 
   return (
     <div onClick={onClick} style={{
@@ -190,7 +236,6 @@ function StockCard({ s, expanded, onClick, deployAmount }) {
       border: `1px solid ${expanded ? scoreColor(s.calvin_score) + "60" : "rgba(255,255,255,0.06)"}`,
       padding: 20, cursor: "pointer", transition: "all 0.2s"
     }}>
-      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "#F3F4F6", letterSpacing: -0.5 }}>{s.ticker}</div>
@@ -205,14 +250,12 @@ function StockCard({ s, expanded, onClick, deployAmount }) {
         </div>
       </div>
 
-      {/* Pills */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
         <Pill text={s.peg_signal} color={pegColor(s.peg_signal)} />
         <Pill text={`${Number(s.drawdown_pct).toFixed(1)}% off high`} color={s.drawdown_pct > 25 ? "#EF4444" : s.drawdown_pct > 15 ? "#F59E0B" : "#6B7280"} />
         {deployAmount > 0 && <Pill text={`Deploy $${deployAmount}`} color="#10B981" />}
       </div>
 
-      {/* Factor scores bar */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginBottom: 12 }}>
         {[
           { l: "Growth", v: s.growth_score },
@@ -222,40 +265,29 @@ function StockCard({ s, expanded, onClick, deployAmount }) {
         ].map(f => (
           <div key={f.l} style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: "#6B7280", marginBottom: 1 }}>{f.l}</div>
-            <div style={{
-              fontSize: 16, fontWeight: 700,
-              color: f.v >= 75 ? "#10B981" : f.v >= 50 ? "#F59E0B" : "#EF4444"
-            }}>{Math.round(f.v || 0)}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: factorColor(f.v || 0) }}>
+              {Math.round(f.v || 0)}
+            </div>
           </div>
         ))}
       </div>
 
-      {/* Lynch Tunnel */}
       <TunnelBar s={s} />
 
-      {/* Expanded detail */}
       {expanded && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-          <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-            <div style={{ flex: "1 1 200px", minHeight: 160 }}>
-              <ResponsiveContainer width="100%" height={160}>
-                <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
-                  <PolarGrid stroke="rgba(255,255,255,0.08)" />
-                  <PolarAngleAxis dataKey="factor" tick={{ fontSize: 10, fill: "#9CA3AF" }} />
-                  <PolarRadiusAxis angle={90} domain={[0, 100]} tick={false} axisLine={false} />
-                  <Radar dataKey="score" stroke={scoreColor(s.calvin_score)} fill={scoreColor(s.calvin_score)} fillOpacity={0.2} strokeWidth={2} />
-                </RadarChart>
-              </ResponsiveContainer>
+          <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+            <div style={{ flex: "0 0 160px" }}>
+              <RadarChart scores={scores} color={scoreColor(s.calvin_score)} />
             </div>
-            <div style={{ flex: "1 1 200px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, minWidth: 200 }}>
               <Metric label="Fwd P/E" value={Number(s.forward_pe).toFixed(1)} sub={`Hist avg: ${s.hist_avg_pe}`} />
               <Metric label="Fwd PEG" value={Number(s.forward_peg).toFixed(2)} sub={`Trail: ${Number(s.trailing_peg).toFixed(2)}`} />
-              <Metric label="EPS Growth" value={`${s.forward_eps_growth}%`} sub={`Rev growth in data`} />
+              <Metric label="EPS Growth" value={`${s.forward_eps_growth}%`} sub={`Op Margin: ${s.operating_margin}%`} />
               <Metric label="ROE" value={`${Number(s.roe).toFixed(1)}%`} sub={`GM: ${s.gross_margin}%`} />
             </div>
           </div>
 
-          {/* Recommendation */}
           <div style={{
             padding: "10px 14px", borderRadius: 10,
             background: scoreColor(s.calvin_score) + "10",
@@ -322,7 +354,6 @@ function App() {
   const [deployCash, setDeployCash] = useState(0);
   const [scanMeta, setScanMeta] = useState({});
 
-  // Load scan list on mount
   useEffect(() => {
     fetchScanList().then(files => {
       if (files.length === 0) {
@@ -332,13 +363,12 @@ function App() {
       }
       setScans(files);
       setSelectedFile(files[0]);
-    }).catch(e => {
-      setError("Could not load scan list. Check that the repository is public and GitHub Pages is enabled.");
+    }).catch(() => {
+      setError("Could not load scan list.");
       setLoading(false);
     });
   }, []);
 
-  // Load scan data when selection changes
   useEffect(() => {
     if (!selectedFile) return;
     setLoading(true);
@@ -353,31 +383,18 @@ function App() {
       });
       setLoading(false);
       setError(null);
-    }).catch(e => {
-      setError(`Failed to load scan: ${selectedFile}`);
+    }).catch(() => {
+      setError("Failed to load scan: " + selectedFile);
       setLoading(false);
     });
   }, [selectedFile]);
 
-  // Deployment allocation
   const qualifying = stocks.filter(s => s.calvin_score >= 60);
   const totalQ = qualifying.reduce((sum, s) => sum + (s.calvin_score || 0), 0) || 1;
-  const getAlloc = (s) => {
-    if (s.calvin_score < 60 || deployCash <= 0) return 0;
-    return Math.round(deployCash * (s.calvin_score / totalQ));
-  };
-
-  // Bar chart data
-  const barData = stocks.map(s => ({
-    ticker: s.ticker,
-    score: s.calvin_score || 0,
-    fill: scoreColor(s.calvin_score || 0)
-  }));
+  const getAlloc = s => (s.calvin_score < 60 || deployCash <= 0) ? 0 : Math.round(deployCash * (s.calvin_score / totalQ));
 
   return (
     <div style={{ padding: "24px 16px", maxWidth: 840, margin: "0 auto" }}>
-
-      {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>
           Calvin Score Scanner
@@ -385,14 +402,11 @@ function App() {
         <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: -0.5 }}>
           Portfolio Deployment Dashboard
         </div>
-
-        {/* Scan selector */}
         {scans.length > 0 && (
           <div style={{ marginTop: 12 }}>
             <ScanSelector scans={scans} selected={selectedFile} onSelect={setSelectedFile} />
           </div>
         )}
-
         {scanMeta.timestamp && (
           <div style={{ fontSize: 12, color: "#6B7280", marginTop: 8 }}>
             Scanned: {new Date(scanMeta.timestamp).toLocaleString()} &middot; Mode: {scanMeta.mode} &middot; Data from stockanalysis.com
@@ -400,7 +414,6 @@ function App() {
         )}
       </div>
 
-      {/* Loading / Error states */}
       {loading && (
         <div style={{ textAlign: "center", padding: 60 }}>
           <div style={{ fontSize: 16, color: "#9CA3AF" }}>Loading scan data...</div>
@@ -419,15 +432,13 @@ function App() {
 
       {!loading && !error && stocks.length > 0 && (
         <>
-          {/* Summary metrics */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 24 }}>
-            <Metric label="Top pick" value={stocks[0].ticker} sub={`Score: ${stocks[0].calvin_score}`} large />
-            <Metric label="Cash" value={deployCash > 0 ? `$${deployCash.toLocaleString()}` : "\u2014"} sub="Available to deploy" large />
-            <Metric label="Candidates" value={qualifying.length} sub="Score \u2265 60" large />
+            <Metric label="Top pick" value={stocks[0].ticker} sub={"Score: " + stocks[0].calvin_score} large />
+            <Metric label="Cash" value={deployCash > 0 ? "$" + deployCash.toLocaleString() : "\u2014"} sub="Available to deploy" large />
+            <Metric label="Candidates" value={qualifying.length} sub={"Score \u2265 60"} large />
             <Metric label="Best signal" value={(stocks[0].peg_signal || "").split(" ")[0]} sub="Dual-PEG" large />
           </div>
 
-          {/* Composite scores bar chart */}
           <div style={{
             marginBottom: 24, background: "rgba(17,24,39,0.6)", borderRadius: 14,
             padding: 16, border: "1px solid rgba(255,255,255,0.06)"
@@ -435,22 +446,9 @@ function App() {
             <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>
               Composite Scores
             </div>
-            <ResponsiveContainer width="100%" height={Math.max(120, stocks.length * 28)}>
-              <BarChart data={barData} layout="vertical" margin={{ left: 4, right: 16, top: 0, bottom: 0 }}>
-                <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: "#6B7280" }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="ticker" tick={{ fontSize: 12, fill: "#D1D5DB", fontWeight: 600 }} axisLine={false} tickLine={false} width={50} />
-                <Tooltip
-                  contentStyle={{ background: "#1F2937", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12, color: "#F3F4F6" }}
-                  formatter={(v) => [v, "Calvin Score"]}
-                />
-                <Bar dataKey="score" radius={[0, 6, 6, 0]} barSize={16}>
-                  {barData.map((d, i) => <Cell key={i} fill={d.fill} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <ScoreBar stocks={stocks} />
           </div>
 
-          {/* Deployment allocation */}
           {qualifying.length > 0 && deployCash > 0 && (
             <div style={{
               marginBottom: 24, padding: 16, borderRadius: 14,
@@ -475,7 +473,6 @@ function App() {
             </div>
           )}
 
-          {/* Stock cards */}
           <div style={{ display: "grid", gap: 12 }}>
             {stocks.map(s => (
               <StockCard
@@ -488,7 +485,6 @@ function App() {
             ))}
           </div>
 
-          {/* Footer */}
           <div style={{
             marginTop: 24, padding: 16, borderRadius: 14,
             background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)"
@@ -496,7 +492,7 @@ function App() {
             <div style={{ fontSize: 11, color: "#6B7280", lineHeight: 1.6 }}>
               Calvin Score Scanner &middot; Factor weights: Growth 35% &middot; Value 30% &middot; Quality 20% &middot; Discount 15%.
               Dual-PEG value system with Lynch Tunnel indicator. All scores use deterministic linear interpolation.
-              This is a decision support tool, not financial advice. The user's judgment is the final authority.
+              This is a decision support tool, not financial advice.
             </div>
           </div>
         </>
