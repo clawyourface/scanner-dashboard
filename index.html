@@ -153,14 +153,19 @@ function RadarChart({ scores, color }) {
           points={angles.map(a => `${cx + (ring/100)*r*Math.cos(a)},${cy + (ring/100)*r*Math.sin(a)}`).join(" ")}
           fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
       ))}
-      {angles.map((a, i) => (
-        <g key={i}>
-          <line x1={cx} y1={cy} x2={cx + r * Math.cos(a)} y2={cy + r * Math.sin(a)}
-            stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
-          <text x={cx + (r + 22) * Math.cos(a)} y={cy + (r + 22) * Math.sin(a) + 4}
-            textAnchor="middle" fill="#9CA3AF" fontSize="11">{labels[i]}</text>
-        </g>
-      ))}
+      {angles.map((a, i) => {
+        const lx = cx + (r + 22) * Math.cos(a);
+        const ly = cy + (r + 22) * Math.sin(a) + 4;
+        const anchor = lx < cx - 5 ? "end" : lx > cx + 5 ? "start" : "middle";
+        return (
+          <g key={i}>
+            <line x1={cx} y1={cy} x2={cx + r * Math.cos(a)} y2={cy + r * Math.sin(a)}
+              stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+            <text x={lx} y={ly}
+              textAnchor={anchor} fill="#9CA3AF" fontSize="11">{labels[i]}</text>
+          </g>
+        );
+      })}
       <polygon points={pointsFn(scores)} fill={color} fillOpacity={0.15}
         stroke={color} strokeWidth="2" />
       {scores.map((v, i) => {
