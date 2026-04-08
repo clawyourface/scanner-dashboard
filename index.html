@@ -136,7 +136,7 @@ function ScoreBar({ stocks }) {
 
 function RadarChart({ scores, color }) {
   const labels = ["Growth", "Value", "Quality", "Discount"];
-  const cx = 80, cy = 80, r = 60;
+  const cx = 100, cy = 100, r = 60;
   const angles = labels.map((_, i) => (Math.PI * 2 * i / labels.length) - Math.PI / 2);
 
   const rings = [25, 50, 75, 100];
@@ -147,7 +147,7 @@ function RadarChart({ scores, color }) {
   }).join(" ");
 
   return (
-    <svg width="160" height="160" viewBox="0 0 160 160">
+    <svg width="200" height="200" viewBox="0 0 200 200">
       {rings.map(ring => (
         <polygon key={ring}
           points={angles.map(a => `${cx + (ring/100)*r*Math.cos(a)},${cy + (ring/100)*r*Math.sin(a)}`).join(" ")}
@@ -157,8 +157,8 @@ function RadarChart({ scores, color }) {
         <g key={i}>
           <line x1={cx} y1={cy} x2={cx + r * Math.cos(a)} y2={cy + r * Math.sin(a)}
             stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
-          <text x={cx + (r + 14) * Math.cos(a)} y={cy + (r + 14) * Math.sin(a) + 3}
-            textAnchor="middle" fill="#9CA3AF" fontSize="9">{labels[i]}</text>
+          <text x={cx + (r + 22) * Math.cos(a)} y={cy + (r + 22) * Math.sin(a) + 4}
+            textAnchor="middle" fill="#9CA3AF" fontSize="11">{labels[i]}</text>
         </g>
       ))}
       <polygon points={pointsFn(scores)} fill={color} fillOpacity={0.15}
@@ -278,7 +278,7 @@ function StockCard({ s, expanded, onClick, deployAmount }) {
       {expanded && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
           <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-            <div style={{ flex: "0 0 160px" }}>
+            <div style={{ flex: "0 0 200px" }}>
               <RadarChart scores={scores} color={scoreColor(s.calvin_score)} />
             </div>
             <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, minWidth: 200 }}>
